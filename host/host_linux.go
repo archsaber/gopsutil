@@ -15,7 +15,7 @@ import (
 	"strings"
 	"unsafe"
 
-	"github.com/shirou/gopsutil/internal/common"
+	"github.com/archsaber/gopsutil/internal/common"
 )
 
 type LSB struct {

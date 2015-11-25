@@ -10,11 +10,11 @@ import (
 	"unsafe"
 
 	"github.com/StackExchange/wmi"
-	"github.com/shirou/w32"
+	"github.com/archsaber/w32"
 
-	"github.com/shirou/gopsutil/internal/common"
-	cpu "github.com/shirou/gopsutil/cpu"
-	net "github.com/shirou/gopsutil/net"
+	"github.com/archsaber/gopsutil/internal/common"
+	cpu "github.com/archsaber/gopsutil/cpu"
+	net "github.com/archsaber/gopsutil/net"
 )
 
 const (
