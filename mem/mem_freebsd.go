@@ -3,6 +3,7 @@
 package mem
 
 import (
+	"errors"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -78,8 +79,8 @@ func VirtualMemory() (*VirtualMemoryStat, error) {
 	}
 
 	ret.Available = ret.Inactive + ret.Cached + ret.Free
-	ret.Used = ret.Active + ret.Wired + ret.Cached
-	ret.UsedPercent = float64(ret.Total-ret.Available) / float64(ret.Total) * 100.0
+	ret.Used = ret.Total - ret.Available
+	ret.UsedPercent = float64(ret.Used) / float64(ret.Total) * 100.0
 
 	return ret, nil
 }
@@ -87,11 +88,15 @@ func VirtualMemory() (*VirtualMemoryStat, error) {
 // Return swapinfo
 // FreeBSD can have multiple swap devices. but use only first device
 func SwapMemory() (*SwapMemoryStat, error) {
-	out, err := exec.Command("swapinfo").Output()
+	swapinfo, err := exec.LookPath("swapinfo")
 	if err != nil {
 		return nil, err
 	}
-	var ret *SwapMemoryStat
+
+	out, err := invoke.Command(swapinfo)
+	if err != nil {
+		return nil, err
+	}
 	for _, line := range strings.Split(string(out), "\n") {
 		values := strings.Fields(line)
 		// skip title line
@@ -117,13 +122,13 @@ func SwapMemory() (*SwapMemoryStat, error) {
 			return nil, err
 		}
 
-		ret = &SwapMemoryStat{
+		return &SwapMemoryStat{
 			Total:       total_v,
 			Used:        used_v,
 			Free:        free_v,
 			UsedPercent: up_v,
-		}
+		}, nil
 	}
 
-	return ret, nil
+	return nil, errors.New("no swap devices found")
 }

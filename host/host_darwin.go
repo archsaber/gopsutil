@@ -11,13 +11,18 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 	"unsafe"
 
 	"github.com/archsaber/gopsutil/internal/common"
+	"github.com/archsaber/gopsutil/process"
 )
 
-func HostInfo() (*HostInfoStat, error) {
-	ret := &HostInfoStat{
+// from utmpx.h
+const USER_PROCESS = 7
+
+func Info() (*InfoStat, error) {
+	ret := &InfoStat{
 		OS:             runtime.GOOS,
 		PlatformFamily: "darwin",
 	}
@@ -27,45 +32,68 @@ func HostInfo() (*HostInfoStat, error) {
 		ret.Hostname = hostname
 	}
 
-	platform, family, version, err := GetPlatformInformation()
+	platform, family, pver, version, err := PlatformInformation()
 	if err == nil {
 		ret.Platform = platform
 		ret.PlatformFamily = family
-		ret.PlatformVersion = version
+		ret.PlatformVersion = pver
+		ret.KernelVersion = version
 	}
-	system, role, err := GetVirtualization()
+
+	system, role, err := Virtualization()
 	if err == nil {
 		ret.VirtualizationSystem = system
 		ret.VirtualizationRole = role
 	}
 
-	values, err := common.DoSysctrl("kern.boottime")
+	boot, err := BootTime()
 	if err == nil {
-		// ex: { sec = 1392261637, usec = 627534 } Thu Feb 13 12:20:37 2014
-		v := strings.Replace(values[2], ",", "", 1)
-		t, err := strconv.ParseUint(v, 10, 64)
-		if err != nil {
-			ret.Uptime = t
-		}
+		ret.BootTime = boot
+		ret.Uptime = uptime(boot)
+	}
+
+	procs, err := process.Pids()
+	if err == nil {
+		ret.Procs = uint64(len(procs))
+	}
+
+	values, err := common.DoSysctrl("kern.uuid")
+	if err == nil && len(values) == 1 && values[0] != "" {
+		ret.HostID = values[0]
 	}
 
 	return ret, nil
 }
 
 func BootTime() (uint64, error) {
+	if cachedBootTime != 0 {
+		return cachedBootTime, nil
+	}
 	values, err := common.DoSysctrl("kern.boottime")
 	if err != nil {
 		return 0, err
 	}
 	// ex: { sec = 1392261637, usec = 627534 } Thu Feb 13 12:20:37 2014
 	v := strings.Replace(values[2], ",", "", 1)
-
 	boottime, err := strconv.ParseInt(v, 10, 64)
 	if err != nil {
 		return 0, err
 	}
+	cachedBootTime = uint64(boottime)
 
-	return uint64(boottime), nil
+	return cachedBootTime, nil
+}
+
+func uptime(boot uint64) uint64 {
+	return uint64(time.Now().Unix()) - boot
+}
+
+func Uptime() (uint64, error) {
+	boot, err := BootTime()
+	if err != nil {
+		return 0, err
+	}
+	return uptime(boot), nil
 }
 
 func Users() ([]UserStat, error) {
@@ -95,7 +123,7 @@ func Users() ([]UserStat, error) {
 		if err != nil {
 			continue
 		}
-		if u.Type != 7 { // skip if not USERPROCESS
+		if u.Type != USER_PROCESS {
 			continue
 		}
 		user := UserStat{
@@ -111,25 +139,40 @@ func Users() ([]UserStat, error) {
 
 }
 
-func GetPlatformInformation() (string, string, string, error) {
+func PlatformInformation() (string, string, string, string, error) {
 	platform := ""
 	family := ""
 	version := ""
+	pver := ""
 
-	out, err := exec.Command("uname", "-s").Output()
+	sw_vers, err := exec.LookPath("sw_vers")
+	if err != nil {
+		return "", "", "", "", err
+	}
+	uname, err := exec.LookPath("uname")
+	if err != nil {
+		return "", "", "", "", err
+	}
+
+	out, err := invoke.Command(uname, "-s")
 	if err == nil {
 		platform = strings.ToLower(strings.TrimSpace(string(out)))
 	}
 
-	out, err = exec.Command("uname", "-r").Output()
+	out, err = invoke.Command(sw_vers, "-productVersion")
+	if err == nil {
+		pver = strings.ToLower(strings.TrimSpace(string(out)))
+	}
+
+	out, err = invoke.Command(uname, "-r")
 	if err == nil {
 		version = strings.ToLower(strings.TrimSpace(string(out)))
 	}
 
-	return platform, family, version, nil
+	return platform, family, pver, version, nil
 }
 
-func GetVirtualization() (string, string, error) {
+func Virtualization() (string, string, error) {
 	system := ""
 	role := ""
 

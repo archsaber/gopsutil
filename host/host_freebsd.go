@@ -11,9 +11,11 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 	"unsafe"
 
 	"github.com/archsaber/gopsutil/internal/common"
+	"github.com/archsaber/gopsutil/process"
 )
 
 const (
@@ -22,8 +24,8 @@ const (
 	UTHostSize = 16
 )
 
-func HostInfo() (*HostInfoStat, error) {
-	ret := &HostInfoStat{
+func Info() (*InfoStat, error) {
+	ret := &InfoStat{
 		OS:             runtime.GOOS,
 		PlatformFamily: "freebsd",
 	}
@@ -33,32 +35,43 @@ func HostInfo() (*HostInfoStat, error) {
 		ret.Hostname = hostname
 	}
 
-	platform, family, version, err := GetPlatformInformation()
+	platform, family, version, err := PlatformInformation()
 	if err == nil {
 		ret.Platform = platform
 		ret.PlatformFamily = family
 		ret.PlatformVersion = version
+		ret.KernelVersion = version
 	}
-	system, role, err := GetVirtualization()
+
+	system, role, err := Virtualization()
 	if err == nil {
 		ret.VirtualizationSystem = system
 		ret.VirtualizationRole = role
 	}
 
-	values, err := common.DoSysctrl("kern.boottime")
+	boot, err := BootTime()
 	if err == nil {
-		// ex: { sec = 1392261637, usec = 627534 } Thu Feb 13 12:20:37 2014
-		v := strings.Replace(values[2], ",", "", 1)
-		t, err := strconv.ParseUint(v, 10, 64)
-		if err == nil {
-			ret.Uptime = t
-		}
+		ret.BootTime = boot
+		ret.Uptime = uptime(boot)
+	}
+
+	procs, err := process.Pids()
+	if err == nil {
+		ret.Procs = uint64(len(procs))
+	}
+
+	values, err := common.DoSysctrl("kern.hostuuid")
+	if err == nil && len(values) == 1 && values[0] != "" {
+		ret.HostID = values[0]
 	}
 
 	return ret, nil
 }
 
-func BootTime() (int64, error) {
+func BootTime() (uint64, error) {
+	if cachedBootTime != 0 {
+		return cachedBootTime, nil
+	}
 	values, err := common.DoSysctrl("kern.boottime")
 	if err != nil {
 		return 0, err
@@ -66,12 +79,25 @@ func BootTime() (int64, error) {
 	// ex: { sec = 1392261637, usec = 627534 } Thu Feb 13 12:20:37 2014
 	v := strings.Replace(values[2], ",", "", 1)
 
-	boottime, err := strconv.ParseInt(v, 10, 64)
+	boottime, err := strconv.ParseUint(v, 10, 64)
 	if err != nil {
 		return 0, err
 	}
+	cachedBootTime = boottime
 
 	return boottime, nil
+}
+
+func uptime(boot uint64) uint64 {
+	return uint64(time.Now().Unix()) - boot
+}
+
+func Uptime() (uint64, error) {
+	boot, err := BootTime()
+	if err != nil {
+		return 0, err
+	}
+	return uptime(boot), nil
 }
 
 func Users() ([]UserStat, error) {
@@ -92,13 +118,11 @@ func Users() ([]UserStat, error) {
 		return ret, err
 	}
 
-	u := Utmpx{}
-	entrySize := int(unsafe.Sizeof(u)) - 3
-	entrySize = 197 // TODO: why should 197
+	entrySize := sizeOfUtmpx
 	count := len(buf) / entrySize
 
 	for i := 0; i < count; i++ {
-		b := buf[i*entrySize : i*entrySize+entrySize]
+		b := buf[i*sizeOfUtmpx : (i+1)*sizeOfUtmpx]
 		var u Utmpx
 		br := bytes.NewReader(b)
 		err := binary.Read(br, binary.LittleEndian, &u)
@@ -120,17 +144,21 @@ func Users() ([]UserStat, error) {
 
 }
 
-func GetPlatformInformation() (string, string, string, error) {
+func PlatformInformation() (string, string, string, error) {
 	platform := ""
 	family := ""
 	version := ""
+	uname, err := exec.LookPath("uname")
+	if err != nil {
+		return "", "", "", err
+	}
 
-	out, err := exec.Command("uname", "-s").Output()
+	out, err := invoke.Command(uname, "-s")
 	if err == nil {
 		platform = strings.ToLower(strings.TrimSpace(string(out)))
 	}
 
-	out, err = exec.Command("uname", "-r").Output()
+	out, err = invoke.Command(uname, "-r")
 	if err == nil {
 		version = strings.ToLower(strings.TrimSpace(string(out)))
 	}
@@ -138,7 +166,7 @@ func GetPlatformInformation() (string, string, string, error) {
 	return platform, family, version, nil
 }
 
-func GetVirtualization() (string, string, error) {
+func Virtualization() (string, string, error) {
 	system := ""
 	role := ""
 

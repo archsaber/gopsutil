@@ -5,10 +5,11 @@ package process
 import (
 	"bytes"
 	"encoding/binary"
-	"unsafe"
+	"strings"
+	"syscall"
 
-	"github.com/archsaber/gopsutil/internal/common"
 	cpu "github.com/archsaber/gopsutil/cpu"
+	"github.com/archsaber/gopsutil/internal/common"
 	net "github.com/archsaber/gopsutil/net"
 )
 
@@ -39,7 +40,7 @@ func (p *Process) Ppid() (int32, error) {
 		return 0, err
 	}
 
-	return k.KiPpid, nil
+	return k.Ppid, nil
 }
 func (p *Process) Name() (string, error) {
 	k, err := p.getKProc()
@@ -47,30 +48,81 @@ func (p *Process) Name() (string, error) {
 		return "", err
 	}
 
-	return string(k.KiComm[:]), nil
+	return common.IntToString(k.Comm[:]), nil
 }
 func (p *Process) Exe() (string, error) {
-	return "", common.NotImplementedError
+	return "", common.ErrNotImplementedError
 }
+
 func (p *Process) Cmdline() (string, error) {
-	return "", common.NotImplementedError
+	mib := []int32{CTLKern, KernProc, KernProcArgs, p.Pid}
+	buf, _, err := common.CallSyscall(mib)
+	if err != nil {
+		return "", err
+	}
+	ret := strings.FieldsFunc(string(buf), func(r rune) bool {
+		if r == '\u0000' {
+			return true
+		}
+		return false
+	})
+
+	return strings.Join(ret, " "), nil
+}
+
+func (p *Process) CmdlineSlice() ([]string, error) {
+	mib := []int32{CTLKern, KernProc, KernProcArgs, p.Pid}
+	buf, _, err := common.CallSyscall(mib)
+	if err != nil {
+		return nil, err
+	}
+	if len(buf) == 0 {
+		return nil, nil
+	}
+	if buf[len(buf)-1] == 0 {
+		buf = buf[:len(buf)-1]
+	}
+	parts := bytes.Split(buf, []byte{0})
+	var strParts []string
+	for _, p := range parts {
+		strParts = append(strParts, string(p))
+	}
+
+	return strParts, nil
 }
 func (p *Process) CreateTime() (int64, error) {
-	return 0, common.NotImplementedError
+	return 0, common.ErrNotImplementedError
 }
 func (p *Process) Cwd() (string, error) {
-	return "", common.NotImplementedError
+	return "", common.ErrNotImplementedError
 }
 func (p *Process) Parent() (*Process, error) {
-	return p, common.NotImplementedError
+	return p, common.ErrNotImplementedError
 }
 func (p *Process) Status() (string, error) {
 	k, err := p.getKProc()
 	if err != nil {
 		return "", err
 	}
+	var s string
+	switch k.Stat {
+	case SIDL:
+		s = "I"
+	case SRUN:
+		s = "R"
+	case SSLEEP:
+		s = "S"
+	case SSTOP:
+		s = "T"
+	case SZOMB:
+		s = "Z"
+	case SWAIT:
+		s = "W"
+	case SLOCK:
+		s = "L"
+	}
 
-	return string(k.KiStat[:]), nil
+	return s, nil
 }
 func (p *Process) Uids() ([]int32, error) {
 	k, err := p.getKProc()
@@ -80,7 +132,7 @@ func (p *Process) Uids() ([]int32, error) {
 
 	uids := make([]int32, 0, 3)
 
-	uids = append(uids, int32(k.KiRuid), int32(k.KiUID), int32(k.KiSvuid))
+	uids = append(uids, int32(k.Ruid), int32(k.Uid), int32(k.Svuid))
 
 	return uids, nil
 }
@@ -91,7 +143,7 @@ func (p *Process) Gids() ([]int32, error) {
 	}
 
 	gids := make([]int32, 0, 3)
-	gids = append(gids, int32(k.KiRgid), int32(k.KiNgroups[0]), int32(k.KiSvuid))
+	gids = append(gids, int32(k.Rgid), int32(k.Ngroups), int32(k.Svgid))
 
 	return gids, nil
 }
@@ -101,7 +153,7 @@ func (p *Process) Terminal() (string, error) {
 		return "", err
 	}
 
-	ttyNr := uint64(k.KiTdev)
+	ttyNr := uint64(k.Tdev)
 
 	termmap, err := getTerminalMap()
 	if err != nil {
@@ -111,23 +163,34 @@ func (p *Process) Terminal() (string, error) {
 	return termmap[ttyNr], nil
 }
 func (p *Process) Nice() (int32, error) {
-	return 0, common.NotImplementedError
+	k, err := p.getKProc()
+	if err != nil {
+		return 0, err
+	}
+	return int32(k.Nice), nil
 }
 func (p *Process) IOnice() (int32, error) {
-	return 0, common.NotImplementedError
+	return 0, common.ErrNotImplementedError
 }
 func (p *Process) Rlimit() ([]RlimitStat, error) {
 	var rlimit []RlimitStat
-	return rlimit, common.NotImplementedError
+	return rlimit, common.ErrNotImplementedError
 }
 func (p *Process) IOCounters() (*IOCountersStat, error) {
-	return nil, common.NotImplementedError
+	k, err := p.getKProc()
+	if err != nil {
+		return nil, err
+	}
+	return &IOCountersStat{
+		ReadCount:  uint64(k.Rusage.Inblock),
+		WriteCount: uint64(k.Rusage.Oublock),
+	}, nil
 }
 func (p *Process) NumCtxSwitches() (*NumCtxSwitchesStat, error) {
-	return nil, common.NotImplementedError
+	return nil, common.ErrNotImplementedError
 }
 func (p *Process) NumFDs() (int32, error) {
-	return 0, common.NotImplementedError
+	return 0, common.ErrNotImplementedError
 }
 func (p *Process) NumThreads() (int32, error) {
 	k, err := p.getKProc()
@@ -135,61 +198,80 @@ func (p *Process) NumThreads() (int32, error) {
 		return 0, err
 	}
 
-	return k.KiNumthreads, nil
+	return k.Numthreads, nil
 }
 func (p *Process) Threads() (map[string]string, error) {
 	ret := make(map[string]string, 0)
-	return ret, common.NotImplementedError
+	return ret, common.ErrNotImplementedError
 }
-func (p *Process) CPUTimes() (*cpu.CPUTimesStat, error) {
-	return nil, common.NotImplementedError
+func (p *Process) Times() (*cpu.TimesStat, error) {
+	k, err := p.getKProc()
+	if err != nil {
+		return nil, err
+	}
+	return &cpu.TimesStat{
+		CPU:    "cpu",
+		User:   float64(k.Rusage.Utime.Sec) + float64(k.Rusage.Utime.Usec)/1000000,
+		System: float64(k.Rusage.Stime.Sec) + float64(k.Rusage.Stime.Usec)/1000000,
+	}, nil
 }
 func (p *Process) CPUAffinity() ([]int32, error) {
-	return nil, common.NotImplementedError
+	return nil, common.ErrNotImplementedError
 }
 func (p *Process) MemoryInfo() (*MemoryInfoStat, error) {
 	k, err := p.getKProc()
 	if err != nil {
 		return nil, err
 	}
-
-	ret := &MemoryInfoStat{
-		RSS: uint64(k.KiRssize),
-		VMS: uint64(k.KiSize),
+	v, err := syscall.Sysctl("vm.stats.vm.v_page_size")
+	if err != nil {
+		return nil, err
 	}
+	pageSize := common.LittleEndian.Uint16([]byte(v))
 
-	return ret, nil
+	return &MemoryInfoStat{
+		RSS: uint64(k.Rssize) * uint64(pageSize),
+		VMS: uint64(k.Size),
+	}, nil
 }
 func (p *Process) MemoryInfoEx() (*MemoryInfoExStat, error) {
-	return nil, common.NotImplementedError
-}
-func (p *Process) MemoryPercent() (float32, error) {
-	return 0, common.NotImplementedError
+	return nil, common.ErrNotImplementedError
 }
 
 func (p *Process) Children() ([]*Process, error) {
-	return nil, common.NotImplementedError
+	pids, err := common.CallPgrep(invoke, p.Pid)
+	if err != nil {
+		return nil, err
+	}
+	ret := make([]*Process, 0, len(pids))
+	for _, pid := range pids {
+		np, err := NewProcess(pid)
+		if err != nil {
+			return nil, err
+		}
+		ret = append(ret, np)
+	}
+	return ret, nil
 }
 
 func (p *Process) OpenFiles() ([]OpenFilesStat, error) {
-	return nil, common.NotImplementedError
+	return nil, common.ErrNotImplementedError
 }
 
-func (p *Process) Connections() ([]net.NetConnectionStat, error) {
-	return nil, common.NotImplementedError
+func (p *Process) Connections() ([]net.ConnectionStat, error) {
+	return nil, common.ErrNotImplementedError
+}
+
+func (p *Process) NetIOCounters(pernic bool) ([]net.IOCountersStat, error) {
+	return nil, common.ErrNotImplementedError
 }
 
 func (p *Process) IsRunning() (bool, error) {
-	return true, common.NotImplementedError
+	return true, common.ErrNotImplementedError
 }
 func (p *Process) MemoryMaps(grouped bool) (*[]MemoryMapsStat, error) {
 	var ret []MemoryMapsStat
-	return &ret, common.NotImplementedError
-}
-
-func copyParams(k *KinfoProc, p *Process) error {
-
-	return nil
+	return &ret, common.ErrNotImplementedError
 }
 
 func processes() ([]Process, error) {
@@ -202,22 +284,19 @@ func processes() ([]Process, error) {
 	}
 
 	// get kinfo_proc size
-	k := KinfoProc{}
-	procinfoLen := int(unsafe.Sizeof(k))
-	count := int(length / uint64(procinfoLen))
+	count := int(length / uint64(sizeOfKinfoProc))
 
 	// parse buf to procs
 	for i := 0; i < count; i++ {
-		b := buf[i*procinfoLen : i*procinfoLen+procinfoLen]
+		b := buf[i*sizeOfKinfoProc : (i+1)*sizeOfKinfoProc]
 		k, err := parseKinfoProc(b)
 		if err != nil {
 			continue
 		}
-		p, err := NewProcess(int32(k.KiPid))
+		p, err := NewProcess(int32(k.Pid))
 		if err != nil {
 			continue
 		}
-		copyParams(&k, p)
 
 		results = append(results, *p)
 	}
@@ -228,12 +307,8 @@ func processes() ([]Process, error) {
 func parseKinfoProc(buf []byte) (KinfoProc, error) {
 	var k KinfoProc
 	br := bytes.NewReader(buf)
-	err := binary.Read(br, binary.LittleEndian, &k)
-	if err != nil {
-		return k, err
-	}
-
-	return k, nil
+	err := common.Read(br, binary.LittleEndian, &k)
+	return k, err
 }
 
 func (p *Process) getKProc() (*KinfoProc, error) {
@@ -243,8 +318,7 @@ func (p *Process) getKProc() (*KinfoProc, error) {
 	if err != nil {
 		return nil, err
 	}
-	procK := KinfoProc{}
-	if length != uint64(unsafe.Sizeof(procK)) {
+	if length != sizeOfKinfoProc {
 		return nil, err
 	}
 
@@ -252,7 +326,6 @@ func (p *Process) getKProc() (*KinfoProc, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	return &k, nil
 }
 

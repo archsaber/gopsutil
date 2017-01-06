@@ -2,9 +2,7 @@
 
 package docker
 
-import (
-	"testing"
-)
+import "testing"
 
 func TestGetDockerIDList(t *testing.T) {
 	// If there is not docker environment, this test always fail.
@@ -13,6 +11,30 @@ func TestGetDockerIDList(t *testing.T) {
 		_, err := GetDockerIDList()
 		if err != nil {
 			t.Errorf("error %v", err)
+		}
+	*/
+}
+
+func TestGetDockerStat(t *testing.T) {
+	// If there is not docker environment, this test always fail.
+	// not tested here
+
+	/*
+		ret, err := GetDockerStat()
+		if err != nil {
+			t.Errorf("error %v", err)
+		}
+		if len(ret) == 0 {
+			t.Errorf("ret is empty")
+		}
+		empty := CgroupDockerStat{}
+		for _, v := range ret {
+			if empty == v {
+				t.Errorf("empty CgroupDockerStat")
+			}
+			if v.ContainerID == "" {
+				t.Errorf("Could not get container id")
+			}
 		}
 	*/
 }

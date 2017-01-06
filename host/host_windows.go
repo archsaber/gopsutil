@@ -28,8 +28,8 @@ type Win32_OperatingSystem struct {
 	LastBootUpTime time.Time
 }
 
-func HostInfo() (*HostInfoStat, error) {
-	ret := &HostInfoStat{
+func Info() (*InfoStat, error) {
+	ret := &InfoStat{
 		OS: runtime.GOOS,
 	}
 
@@ -38,7 +38,7 @@ func HostInfo() (*HostInfoStat, error) {
 		ret.Hostname = hostname
 	}
 
-	platform, family, version, err := GetPlatformInformation()
+	platform, family, version, err := PlatformInformation()
 	if err == nil {
 		ret.Platform = platform
 		ret.PlatformFamily = family
@@ -47,17 +47,16 @@ func HostInfo() (*HostInfoStat, error) {
 		return ret, err
 	}
 
-	ret.Uptime, err = BootTime()
-	if err != nil {
-		return ret, err
+	boot, err := BootTime()
+	if err == nil {
+		ret.BootTime = boot
+		ret.Uptime, _ = Uptime()
 	}
 
 	procs, err := process.Pids()
-	if err != nil {
-		return ret, err
+	if err == nil {
+		ret.Procs = uint64(len(procs))
 	}
-
-	ret.Procs = uint64(len(procs))
 
 	return ret, nil
 }
@@ -75,7 +74,7 @@ func GetOSInfo() (Win32_OperatingSystem, error) {
 	return dst[0], nil
 }
 
-func BootTime() (uint64, error) {
+func Uptime() (uint64, error) {
 	if osInfo == nil {
 		_, err := GetOSInfo()
 		if err != nil {
@@ -87,7 +86,23 @@ func BootTime() (uint64, error) {
 	return uint64(now.Sub(t).Seconds()), nil
 }
 
-func GetPlatformInformation() (platform string, family string, version string, err error) {
+func bootTime(up uint64) uint64 {
+	return uint64(time.Now().Unix()) - up
+}
+
+func BootTime() (uint64, error) {
+	if cachedBootTime != 0 {
+		return cachedBootTime, nil
+	}
+	up, err := Uptime()
+	if err != nil {
+		return 0, err
+	}
+	cachedBootTime = bootTime(up)
+	return cachedBootTime, nil
+}
+
+func PlatformInformation() (platform string, family string, version string, err error) {
 	if osInfo == nil {
 		_, err = GetOSInfo()
 		if err != nil {

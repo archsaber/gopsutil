@@ -4,14 +4,17 @@ package process
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
+	"os/exec"
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 	"unsafe"
 
-	"github.com/archsaber/gopsutil/internal/common"
 	"github.com/archsaber/gopsutil/cpu"
+	"github.com/archsaber/gopsutil/internal/common"
 	"github.com/archsaber/gopsutil/net"
 )
 
@@ -77,8 +80,38 @@ func (p *Process) Name() (string, error) {
 	return common.IntToString(k.Proc.P_comm[:]), nil
 }
 func (p *Process) Exe() (string, error) {
-	return "", common.NotImplementedError
+	lsof_bin, err := exec.LookPath("lsof")
+	if err != nil {
+		return "", err
+	}
+
+	awk_bin, err := exec.LookPath("awk")
+	if err != nil {
+		return "", err
+	}
+
+	sed_bin, err := exec.LookPath("sed")
+	if err != nil {
+		return "", err
+	}
+
+	lsof := exec.Command(lsof_bin, "-p", strconv.Itoa(int(p.Pid)), "-Fn")
+	awk := exec.Command(awk_bin, "NR==3{print}")
+	sed := exec.Command(sed_bin, "s/n\\//\\//")
+
+	output, _, err := common.Pipeline(lsof, awk, sed)
+
+	if err != nil {
+		return "", err
+	}
+
+	ret := strings.TrimSpace(string(output))
+
+	return ret, nil
 }
+
+// Cmdline returns the command line arguments of the process as a string with
+// each argument separated by 0x20 ascii character.
 func (p *Process) Cmdline() (string, error) {
 	r, err := callPs("command", p.Pid, false)
 	if err != nil {
@@ -86,11 +119,51 @@ func (p *Process) Cmdline() (string, error) {
 	}
 	return strings.Join(r[0], " "), err
 }
+
+// CmdlineSlice returns the command line arguments of the process as a slice with each
+// element being an argument. Because of current deficiencies in the way that the command
+// line arguments are found, single arguments that have spaces in the will actually be
+// reported as two separate items. In order to do something better CGO would be needed
+// to use the native darwin functions.
+func (p *Process) CmdlineSlice() ([]string, error) {
+	r, err := callPs("command", p.Pid, false)
+	if err != nil {
+		return nil, err
+	}
+	return r[0], err
+}
 func (p *Process) CreateTime() (int64, error) {
-	return 0, common.NotImplementedError
+	r, err := callPs("etime", p.Pid, false)
+	if err != nil {
+		return 0, err
+	}
+
+	elapsedSegments := strings.Split(strings.Replace(r[0][0], "-", ":", 1), ":")
+	var elapsedDurations []time.Duration
+	for i := len(elapsedSegments) - 1; i >= 0; i-- {
+		p, err := strconv.ParseInt(elapsedSegments[i], 10, 0)
+		if err != nil {
+			return 0, err
+		}
+		elapsedDurations = append(elapsedDurations, time.Duration(p))
+	}
+
+	var elapsed time.Duration = time.Duration(elapsedDurations[0]) * time.Second
+	if len(elapsedDurations) > 1 {
+		elapsed += time.Duration(elapsedDurations[1]) * time.Minute
+	}
+	if len(elapsedDurations) > 2 {
+		elapsed += time.Duration(elapsedDurations[2]) * time.Hour
+	}
+	if len(elapsedDurations) > 3 {
+		elapsed += time.Duration(elapsedDurations[3]) * time.Hour * 24
+	}
+
+	start := time.Now().Add(-elapsed)
+	return start.Unix() * 1000, nil
 }
 func (p *Process) Cwd() (string, error) {
-	return "", common.NotImplementedError
+	return "", common.ErrNotImplementedError
 }
 func (p *Process) Parent() (*Process, error) {
 	rr, err := common.CallLsof(invoke, p.Pid, "-FR")
@@ -124,11 +197,10 @@ func (p *Process) Uids() ([]int32, error) {
 		return nil, err
 	}
 
-	uids := make([]int32, 0, 3)
+	// See: http://unix.superglobalmegacorp.com/Net2/newsrc/sys/ucred.h.html
+	userEffectiveUID := int32(k.Eproc.Ucred.UID)
 
-	uids = append(uids, int32(k.Eproc.Pcred.P_ruid), int32(k.Eproc.Ucred.Uid), int32(k.Eproc.Pcred.P_svuid))
-
-	return uids, nil
+	return []int32{userEffectiveUID}, nil
 }
 func (p *Process) Gids() ([]int32, error) {
 	k, err := p.getKProc()
@@ -142,7 +214,7 @@ func (p *Process) Gids() ([]int32, error) {
 	return gids, nil
 }
 func (p *Process) Terminal() (string, error) {
-	return "", common.NotImplementedError
+	return "", common.ErrNotImplementedError
 	/*
 		k, err := p.getKProc()
 		if err != nil {
@@ -166,20 +238,20 @@ func (p *Process) Nice() (int32, error) {
 	return int32(k.Proc.P_nice), nil
 }
 func (p *Process) IOnice() (int32, error) {
-	return 0, common.NotImplementedError
+	return 0, common.ErrNotImplementedError
 }
 func (p *Process) Rlimit() ([]RlimitStat, error) {
 	var rlimit []RlimitStat
-	return rlimit, common.NotImplementedError
+	return rlimit, common.ErrNotImplementedError
 }
 func (p *Process) IOCounters() (*IOCountersStat, error) {
-	return nil, common.NotImplementedError
+	return nil, common.ErrNotImplementedError
 }
 func (p *Process) NumCtxSwitches() (*NumCtxSwitchesStat, error) {
-	return nil, common.NotImplementedError
+	return nil, common.ErrNotImplementedError
 }
 func (p *Process) NumFDs() (int32, error) {
-	return 0, common.NotImplementedError
+	return 0, common.ErrNotImplementedError
 }
 func (p *Process) NumThreads() (int32, error) {
 	r, err := callPs("utime,stime", p.Pid, true)
@@ -190,10 +262,10 @@ func (p *Process) NumThreads() (int32, error) {
 }
 func (p *Process) Threads() (map[string]string, error) {
 	ret := make(map[string]string, 0)
-	return ret, common.NotImplementedError
+	return ret, common.ErrNotImplementedError
 }
 
-func convertCpuTimes(s string) (ret float64, err error) {
+func convertCPUTimes(s string) (ret float64, err error) {
 	var t int
 	var _tmp string
 	if strings.Contains(s, ":") {
@@ -218,23 +290,23 @@ func convertCpuTimes(s string) (ret float64, err error) {
 	t += h
 	return float64(t) / ClockTicks, nil
 }
-func (p *Process) CPUTimes() (*cpu.CPUTimesStat, error) {
+func (p *Process) Times() (*cpu.TimesStat, error) {
 	r, err := callPs("utime,stime", p.Pid, false)
 
 	if err != nil {
 		return nil, err
 	}
 
-	utime, err := convertCpuTimes(r[0][0])
+	utime, err := convertCPUTimes(r[0][0])
 	if err != nil {
 		return nil, err
 	}
-	stime, err := convertCpuTimes(r[0][1])
+	stime, err := convertCPUTimes(r[0][1])
 	if err != nil {
 		return nil, err
 	}
 
-	ret := &cpu.CPUTimesStat{
+	ret := &cpu.TimesStat{
 		CPU:    "cpu",
 		User:   utime,
 		System: stime,
@@ -242,7 +314,7 @@ func (p *Process) CPUTimes() (*cpu.CPUTimesStat, error) {
 	return ret, nil
 }
 func (p *Process) CPUAffinity() ([]int32, error) {
-	return nil, common.NotImplementedError
+	return nil, common.ErrNotImplementedError
 }
 func (p *Process) MemoryInfo() (*MemoryInfoStat, error) {
 	r, err := callPs("rss,vsize,pagein", p.Pid, false)
@@ -263,43 +335,51 @@ func (p *Process) MemoryInfo() (*MemoryInfoStat, error) {
 	}
 
 	ret := &MemoryInfoStat{
-		RSS:  uint64(rss),
-		VMS:  uint64(vms),
+		RSS:  uint64(rss) * 1024,
+		VMS:  uint64(vms) * 1024,
 		Swap: uint64(pagein),
 	}
 
 	return ret, nil
 }
 func (p *Process) MemoryInfoEx() (*MemoryInfoExStat, error) {
-	return nil, common.NotImplementedError
-}
-func (p *Process) MemoryPercent() (float32, error) {
-	return 0, common.NotImplementedError
+	return nil, common.ErrNotImplementedError
 }
 
 func (p *Process) Children() ([]*Process, error) {
-	return nil, common.NotImplementedError
+	pids, err := common.CallPgrep(invoke, p.Pid)
+	if err != nil {
+		return nil, err
+	}
+	ret := make([]*Process, 0, len(pids))
+	for _, pid := range pids {
+		np, err := NewProcess(pid)
+		if err != nil {
+			return nil, err
+		}
+		ret = append(ret, np)
+	}
+	return ret, nil
 }
 
 func (p *Process) OpenFiles() ([]OpenFilesStat, error) {
-	return nil, common.NotImplementedError
+	return nil, common.ErrNotImplementedError
 }
 
-func (p *Process) Connections() ([]net.NetConnectionStat, error) {
-	return net.NetConnectionsPid("all", p.Pid)
+func (p *Process) Connections() ([]net.ConnectionStat, error) {
+	return net.ConnectionsPid("all", p.Pid)
+}
+
+func (p *Process) NetIOCounters(pernic bool) ([]net.IOCountersStat, error) {
+	return nil, common.ErrNotImplementedError
 }
 
 func (p *Process) IsRunning() (bool, error) {
-	return true, common.NotImplementedError
+	return true, common.ErrNotImplementedError
 }
 func (p *Process) MemoryMaps(grouped bool) (*[]MemoryMapsStat, error) {
 	var ret []MemoryMapsStat
-	return &ret, common.NotImplementedError
-}
-
-func copyParams(k *KinfoProc, p *Process) error {
-
-	return nil
+	return &ret, common.ErrNotImplementedError
 }
 
 func processes() ([]Process, error) {
@@ -334,8 +414,6 @@ func processes() ([]Process, error) {
 		if err != nil {
 			continue
 		}
-		copyParams(&k, p)
-
 		results = append(results, *p)
 	}
 
@@ -346,7 +424,7 @@ func parseKinfoProc(buf []byte) (KinfoProc, error) {
 	var k KinfoProc
 	br := bytes.NewReader(buf)
 
-	err := Read(br, LittleEndian, &k)
+	err := common.Read(br, binary.LittleEndian, &k)
 	if err != nil {
 		return k, err
 	}
@@ -354,6 +432,8 @@ func parseKinfoProc(buf []byte) (KinfoProc, error) {
 	return k, nil
 }
 
+// Returns a proc as defined here:
+// http://unix.superglobalmegacorp.com/Net2/newsrc/sys/kinfo_proc.h.html
 func (p *Process) getKProc() (*KinfoProc, error) {
 	mib := []int32{CTLKern, KernProc, KernProcPID, p.Pid}
 	procK := KinfoProc{}
@@ -389,15 +469,20 @@ func NewProcess(pid int32) (*Process, error) {
 // And splited by Space. Caller have responsibility to manage.
 // If passed arg pid is 0, get information from all process.
 func callPs(arg string, pid int32, threadOption bool) ([][]string, error) {
+	bin, err := exec.LookPath("ps")
+	if err != nil {
+		return [][]string{}, err
+	}
+
 	var cmd []string
 	if pid == 0 { // will get from all processes.
-		cmd = []string{"-x", "-o", arg}
+		cmd = []string{"-ax", "-o", arg}
 	} else if threadOption {
 		cmd = []string{"-x", "-o", arg, "-M", "-p", strconv.Itoa(int(pid))}
 	} else {
 		cmd = []string{"-x", "-o", arg, "-p", strconv.Itoa(int(pid))}
 	}
-	out, err := invoke.Command("/bin/ps", cmd...)
+	out, err := invoke.Command(bin, cmd...)
 	if err != nil {
 		return [][]string{}, err
 	}
