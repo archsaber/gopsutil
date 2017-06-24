@@ -200,6 +200,10 @@ func Info() ([]InfoStat, error) {
 
 func parseStatLine(line string) (*TimesStat, error) {
 	fields := strings.Fields(line)
+	
+	if len(fields) == 0 {
+		return nil, errors.New("stat does not contain cpu info")
+	}
 
 	if strings.HasPrefix(fields[0], "cpu") == false {
 		//		return CPUTimesStat{}, e
