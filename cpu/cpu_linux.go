@@ -100,7 +100,7 @@ func finishCPUInfo(c *InfoStat) error {
 			return nil
 		}
 	}
-	c.Mhz = value/1000.0  // value is in kHz
+	c.Mhz = value / 1000.0 // value is in kHz
 	return nil
 }
 
@@ -116,6 +116,7 @@ func Info() ([]InfoStat, error) {
 	lines, _ := common.ReadLines(filename)
 
 	var ret []InfoStat
+	var processorName string
 
 	c := InfoStat{CPU: -1, Cores: 1}
 	for _, line := range lines {
@@ -127,6 +128,8 @@ func Info() ([]InfoStat, error) {
 		value := strings.TrimSpace(fields[1])
 
 		switch key {
+		case "Processor":
+			processorName = value
 		case "processor":
 			if c.CPU >= 0 {
 				err := finishCPUInfo(&c)
@@ -135,7 +138,7 @@ func Info() ([]InfoStat, error) {
 				}
 				ret = append(ret, c)
 			}
-			c = InfoStat{Cores: 1}
+			c = InfoStat{Cores: 1, ModelName: processorName}
 			t, err := strconv.ParseInt(value, 10, 64)
 			if err != nil {
 				return ret, err
@@ -150,7 +153,7 @@ func Info() ([]InfoStat, error) {
 		case "model name", "cpu":
 			c.ModelName = value
 			if strings.Contains(value, "POWER8") ||
-			   strings.Contains(value, "POWER7") {
+				strings.Contains(value, "POWER7") {
 				c.Model = strings.Split(value, " ")[0]
 				c.Family = "POWER"
 				c.VendorID = "IBM"
@@ -200,7 +203,7 @@ func Info() ([]InfoStat, error) {
 
 func parseStatLine(line string) (*TimesStat, error) {
 	fields := strings.Fields(line)
-	
+
 	if len(fields) == 0 {
 		return nil, errors.New("stat does not contain cpu info")
 	}
