@@ -101,6 +101,9 @@ func finishCPUInfo(c *InfoStat) error {
 		}
 	}
 	c.Mhz = value / 1000.0 // value is in kHz
+	if c.Mhz > 9999 {
+		c.Mhz = c.Mhz / 1000.0 // value in Hz
+	}
 	return nil
 }
 
