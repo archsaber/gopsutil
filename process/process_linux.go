@@ -475,7 +475,7 @@ func (p *Process) fillFromComm() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return string(comm), nil
+	return strings.TrimSpace(string(comm)), nil
 }
 
 // Get cmdline from /proc/(pid)/cmdline
