@@ -103,6 +103,11 @@ func (p *Process) Exe() (string, error) {
 	return p.fillFromExe()
 }
 
+// Comm returns the command (name) of the process as a string
+func (p *Process) Comm() (string, error) {
+	return p.fillFromComm()
+}
+
 // Cmdline returns the command line arguments of the process as a string with
 // each argument separated by 0x20 ascii character.
 func (p *Process) Cmdline() (string, error) {
@@ -460,6 +465,17 @@ func (p *Process) fillFromExe() (string, error) {
 		return "", err
 	}
 	return string(exe), nil
+}
+
+// Get comm from /proc/(pid)/comm
+func (p *Process) fillFromComm() (string, error) {
+	pid := p.Pid
+	cmdPath := common.HostProc(strconv.Itoa(int(pid)), "comm")
+	comm, err := ioutil.ReadFile(cmdPath)
+	if err != nil {
+		return "", err
+	}
+	return string(comm), nil
 }
 
 // Get cmdline from /proc/(pid)/cmdline

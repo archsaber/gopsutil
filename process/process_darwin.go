@@ -110,6 +110,10 @@ func (p *Process) Exe() (string, error) {
 	return ret, nil
 }
 
+func (p *Process) Comm() (string, error) {
+	return "", common.ErrNotImplementedError
+}
+
 // Cmdline returns the command line arguments of the process as a string with
 // each argument separated by 0x20 ascii character.
 func (p *Process) Cmdline() (string, error) {

@@ -54,6 +54,10 @@ func (p *Process) Exe() (string, error) {
 	return "", common.ErrNotImplementedError
 }
 
+func (p *Process) Comm() (string, error) {
+	return "", common.ErrNotImplementedError
+}
+
 func (p *Process) Cmdline() (string, error) {
 	mib := []int32{CTLKern, KernProc, KernProcArgs, p.Pid}
 	buf, _, err := common.CallSyscall(mib)

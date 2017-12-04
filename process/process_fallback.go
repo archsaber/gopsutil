@@ -44,6 +44,9 @@ func (p *Process) Name() (string, error) {
 func (p *Process) Exe() (string, error) {
 	return "", common.ErrNotImplementedError
 }
+func (p *Process) Comm() (string, error) {
+	return "", common.ErrNotImplementedError
+}
 func (p *Process) Cmdline() (string, error) {
 	return "", common.ErrNotImplementedError
 }
