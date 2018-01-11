@@ -3,6 +3,7 @@
 package cpu
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os/exec"
@@ -30,21 +31,22 @@ func init() {
 }
 
 func Times(percpu bool) ([]TimesStat, error) {
+	return TimesWithContext(context.Background(), percpu)
+}
+
+func TimesWithContext(ctx context.Context, percpu bool) ([]TimesStat, error) {
 	filename := common.HostProc("stat")
 	var lines = []string{}
 	if percpu {
-		var startIdx uint = 1
-		for {
-			linen, _ := common.ReadLinesOffsetN(filename, startIdx, 1)
-			if len(linen) == 0 {
-				break
-			}
-			line := linen[0]
+		statlines, err := common.ReadLines(filename)
+		if err != nil || len(statlines) < 2 {
+			return []TimesStat{}, nil
+		}
+		for _, line := range statlines[1:] {
 			if !strings.HasPrefix(line, "cpu") {
 				break
 			}
 			lines = append(lines, line)
-			startIdx++
 		}
 	} else {
 		lines, _ = common.ReadLinesOffsetN(filename, 0, 1)
@@ -83,22 +85,14 @@ func finishCPUInfo(c *InfoStat) error {
 	// of the value from /proc/cpuinfo because we want to report the maximum
 	// clock-speed of the CPU for c.Mhz, matching the behaviour of Windows
 	lines, err = common.ReadLines(sysCPUPath(c.CPU, "cpufreq/cpuinfo_max_freq"))
-	// if we encounter errors below but has a value from parsing /proc/cpuinfo
-	// then we ignore the error
+	// if we encounter errors below such as there are no cpuinfo_max_freq file,
+	// we just ignore. so let Mhz is 0.
 	if err != nil {
-		if c.Mhz == 0 {
-			return err
-		} else {
-			return nil
-		}
+		return nil
 	}
 	value, err = strconv.ParseFloat(lines[0], 64)
 	if err != nil {
-		if c.Mhz == 0 {
-			return err
-		} else {
-			return nil
-		}
+		return nil
 	}
 	c.Mhz = value / 1000.0 // value is in kHz
 	if c.Mhz > 9999 {
@@ -115,6 +109,10 @@ func finishCPUInfo(c *InfoStat) error {
 // For example a single socket board with two cores each with HT will
 // return 4 CPUInfoStat structs on Linux and the "Cores" field set to 1.
 func Info() ([]InfoStat, error) {
+	return InfoWithContext(context.Background())
+}
+
+func InfoWithContext(ctx context.Context) ([]InfoStat, error) {
 	filename := common.HostProc("cpuinfo")
 	lines, _ := common.ReadLines(filename)
 
@@ -192,6 +190,8 @@ func Info() ([]InfoStat, error) {
 			c.Flags = strings.FieldsFunc(value, func(r rune) bool {
 				return r == ',' || r == ' '
 			})
+		case "microcode":
+			c.Microcode = value
 		}
 	}
 	if c.CPU >= 0 {
