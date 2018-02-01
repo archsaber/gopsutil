@@ -42,6 +42,10 @@ func IOCountersByFileWithContext(ctx context.Context, pernic bool, filename stri
 		return nil, err
 	}
 
+	if len(lines) < 2 {
+		return nil, errors.New("error reading file" + filename)
+	}
+
 	parts := make([]string, 2)
 
 	statlen := len(lines) - 1
